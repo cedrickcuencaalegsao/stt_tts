@@ -27,7 +27,7 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Text to speech.")),
+      appBar: AppBar(title: Text("STT and TTS")),
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.all(0),
