@@ -39,6 +39,10 @@ dependencies:
   syncfusion_flutter_pdf: ^27.2.2  # For PDF reading
   archive: ^3.6.1  # For DOCX reading
   xml: ^6.5.0     # For DOCX parsing
+  flutter_sound: ^9.2.13
+  permission_handler: ^11.3.1
+  path_provider: ^2.1.4
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
