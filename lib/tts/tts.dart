@@ -1,5 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'package:html/parser.dart' as html;
+import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:archive/archive.dart';
 
 class TTSPage extends StatefulWidget {
   const TTSPage({super.key});
@@ -8,12 +17,17 @@ class TTSPage extends StatefulWidget {
   State<TTSPage> createState() => TTSPageState();
 }
 
-class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
-  
+class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
   late TabController _tabController;
+  late FlutterTts flutterTts;
+  late SharedPreferences prefs;
+
+  String documentContent = '';
+  String documentName = '';
+
   final TextEditingController _textController = TextEditingController();
   final TextEditingController _urlController = TextEditingController();
-  
+
   // Voice Settings
   String selectedVoice = 'Female';
   String selectedAccent = 'US English';
@@ -21,28 +35,28 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
   double pitch = 1.0;
   double speechRate = 1.0;
   double volume = 1.0;
-  
+
   // State variables
   bool isPlaying = false;
   bool isPaused = false;
   String currentText = '';
-  
+
   // Mock data for favorites and history
   List<String> favoriteTexts = [
     "Welcome to our Text-to-Speech application",
     "Flutter makes mobile development easy",
   ];
-  
+
   List<Map<String, dynamic>> historyItems = [
     {
       'text': 'Hello world, this is a test message',
       'timestamp': DateTime.now().subtract(const Duration(hours: 1)),
-      'duration': '0:05'
+      'duration': '0:05',
     },
     {
       'text': 'Flutter Text-to-Speech tutorial',
       'timestamp': DateTime.now().subtract(const Duration(hours: 2)),
-      'duration': '0:12'
+      'duration': '0:12',
     },
   ];
 
@@ -50,6 +64,37 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    _initTTS();
+    _loadPreferences();
+  }
+
+  Future<void> _initTTS() async {
+    flutterTts = FlutterTts();
+    await flutterTts.setLanguage(
+      selectedLanguage.toLowerCase().substring(0, 2),
+    );
+    await flutterTts.setSpeechRate(speechRate);
+    await flutterTts.setPitch(pitch);
+    await flutterTts.setVolume(volume);
+
+    flutterTts.setCancelHandler(() {
+      setState(() {
+        isPlaying = false;
+      });
+    });
+  }
+
+  Future<void> _loadPreferences() async {
+    prefs = await SharedPreferences.getInstance();
+    setState(() {
+      favoriteTexts = prefs.getStringList('favorites') ?? favoriteTexts;
+      selectedVoice = prefs.getString('voice') ?? selectedVoice;
+      selectedAccent = prefs.getString('accent') ?? selectedAccent;
+      selectedLanguage = prefs.getString('language') ?? selectedLanguage;
+      speechRate = prefs.getDouble('speechRate') ?? speechRate;
+      pitch = prefs.getDouble('pitch') ?? pitch;
+      volume = prefs.getDouble('volume') ?? volume;
+    });
   }
 
   @override
@@ -57,6 +102,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
     _tabController.dispose();
     _textController.dispose();
     _urlController.dispose();
+    flutterTts.stop();
     super.dispose();
   }
 
@@ -149,7 +195,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 20),
-          
+
           // Voice Gender
           _buildSettingsCard(
             'Voice Gender',
@@ -161,8 +207,9 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                   selectedVoice = value!;
                 });
               },
-              items: ['Male', 'Female', 'Child']
-                  .map<DropdownMenuItem<String>>((String value) {
+              items: ['Male', 'Female', 'Child'].map<DropdownMenuItem<String>>((
+                String value,
+              ) {
                 return DropdownMenuItem<String>(
                   value: value,
                   child: Text(value),
@@ -170,7 +217,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
               }).toList(),
             ),
           ),
-          
+
           // Accent Selection
           _buildSettingsCard(
             'Accent',
@@ -182,16 +229,21 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                   selectedAccent = value!;
                 });
               },
-              items: ['US English', 'British English', 'Australian English', 'Canadian English']
-                  .map<DropdownMenuItem<String>>((String value) {
-                return DropdownMenuItem<String>(
-                  value: value,
-                  child: Text(value),
-                );
-              }).toList(),
+              items:
+                  [
+                    'US English',
+                    'British English',
+                    'Australian English',
+                    'Canadian English',
+                  ].map<DropdownMenuItem<String>>((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
             ),
           ),
-          
+
           // Language Selection
           _buildSettingsCard(
             'Language',
@@ -203,37 +255,44 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                   selectedLanguage = value!;
                 });
               },
-              items: ['English', 'Spanish', 'French', 'German', 'Italian', 'Japanese']
-                  .map<DropdownMenuItem<String>>((String value) {
-                return DropdownMenuItem<String>(
-                  value: value,
-                  child: Text(value),
-                );
-              }).toList(),
+              items:
+                  [
+                    'English',
+                    'Spanish',
+                    'French',
+                    'German',
+                    'Italian',
+                    'Japanese',
+                  ].map<DropdownMenuItem<String>>((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
             ),
           ),
-          
+
           // Speech Rate
           _buildSliderCard('Speech Rate', speechRate, 0.5, 2.0, (value) {
             setState(() {
               speechRate = value;
             });
           }),
-          
+
           // Pitch
           _buildSliderCard('Pitch', pitch, 0.5, 2.0, (value) {
             setState(() {
               pitch = value;
             });
           }),
-          
+
           // Volume
           _buildSliderCard('Volume', volume, 0.0, 1.0, (value) {
             setState(() {
               volume = value;
             });
           }),
-          
+
           const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
@@ -262,10 +321,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             child,
           ],
@@ -274,7 +330,13 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
     );
   }
 
-  Widget _buildSliderCard(String title, double value, double min, double max, Function(double) onChanged) {
+  Widget _buildSliderCard(
+    String title,
+    double value,
+    double min,
+    double max,
+    Function(double) onChanged,
+  ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -291,7 +353,10 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                 ),
                 Text(
                   value.toStringAsFixed(1),
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
                 ),
               ],
             ),
@@ -337,9 +402,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
-                    leading: const CircleAvatar(
-                      child: Icon(Icons.history),
-                    ),
+                    leading: const CircleAvatar(child: Icon(Icons.history)),
                     title: Text(
                       item['text'],
                       maxLines: 2,
@@ -356,7 +419,8 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                           icon: const Icon(Icons.play_arrow),
                         ),
                         IconButton(
-                          onPressed: () => _addToFavoritesFromHistory(item['text']),
+                          onPressed: () =>
+                              _addToFavoritesFromHistory(item['text']),
                           icon: const Icon(Icons.favorite_border),
                         ),
                       ],
@@ -388,7 +452,11 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.favorite_border, size: 64, color: Colors.grey),
+                        Icon(
+                          Icons.favorite_border,
+                          size: 64,
+                          color: Colors.grey,
+                        ),
                         SizedBox(height: 16),
                         Text(
                           'No favorites yet',
@@ -420,12 +488,16 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                onPressed: () => _playFavoriteItem(favoriteTexts[index]),
+                                onPressed: () =>
+                                    _playFavoriteItem(favoriteTexts[index]),
                                 icon: const Icon(Icons.play_arrow),
                               ),
                               IconButton(
                                 onPressed: () => _removeFromFavorites(index),
-                                icon: const Icon(Icons.delete, color: Colors.red),
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.red,
+                                ),
                               ),
                             ],
                           ),
@@ -450,7 +522,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 20),
-          
+
           // File Upload Section
           Card(
             child: Padding(
@@ -486,9 +558,9 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
               ),
             ),
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           // Web Content Section
           Card(
             child: Padding(
@@ -524,66 +596,66 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
               ),
             ),
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           // Document Preview Section
           Expanded(
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Document Preview',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey[300]!),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.description, size: 48, color: Colors.grey),
-                              SizedBox(height: 8),
-                              Text(
-                                'No document loaded',
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                            ],
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: documentContent.isEmpty
+                  ? const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.description, size: 48, color: Colors.grey),
+                          SizedBox(height: 8),
+                          Text(
+                            'No document loaded',
+                            style: TextStyle(color: Colors.grey),
                           ),
-                        ),
+                        ],
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Document: $documentName',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(documentContent),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: null, // Enable when document is loaded
-                            icon: const Icon(Icons.play_arrow),
-                            label: const Text('Read Document'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        OutlinedButton.icon(
-                          onPressed: null, // Enable when document is loaded
-                          icon: const Icon(Icons.download),
-                          label: const Text('Save Audio'),
-                        ),
-                      ],
-                    ),
-                  ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: documentContent.isNotEmpty ? _readDocument : null,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Read Document'),
                 ),
               ),
-            ),
+              const SizedBox(width: 12),
+              OutlinedButton.icon(
+                onPressed: documentContent.isNotEmpty
+                    ? _saveDocumentAudio
+                    : null,
+                icon: const Icon(Icons.download),
+                label: const Text('Save Audio'),
+              ),
+            ],
           ),
         ],
       ),
@@ -621,24 +693,69 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
   }
 
   // Action methods
-  void _playText() {
+  Future<void> _playText() async {
     if (_textController.text.isEmpty) {
       _showSnackBar('Please enter some text to speak');
       return;
     }
-    
+
+    if (isPlaying) {
+      await flutterTts.pause();
+      setState(() {
+        isPlaying = false;
+        isPaused = true;
+      });
+      _showSnackBar('Paused');
+    } else {
+      if (isPaused) {
+        await flutterTts.speak(_textController.text);
+      } else {
+        await _updateTTSSettings();
+        await flutterTts.speak(_textController.text);
+        _addToHistory(_textController.text);
+      }
+    }
+
     setState(() {
-      isPlaying = !isPlaying;
+      isPlaying = true;
+      isPaused = false;
       currentText = _textController.text;
     });
-    
-    // Add to history
-    _addToHistory(_textController.text);
-    
+
     _showSnackBar(isPlaying ? 'Playing...' : 'Paused');
   }
 
-  void _stopText() {
+  Future<void> _updateTTSSettings() async {
+    await flutterTts.setSpeechRate(speechRate);
+    await flutterTts.setPitch(pitch);
+    await flutterTts.setVolume(volume);
+
+    String langCode = selectedLanguage.toLowerCase();
+    switch (langCode) {
+      case 'english':
+        langCode = 'en';
+        break;
+      case 'spanish':
+        langCode = 'es';
+        break;
+      case 'french':
+        langCode = 'fr';
+        break;
+      case 'german':
+        langCode = 'de';
+        break;
+      case 'italian':
+        langCode = 'it';
+        break;
+      case 'japanese':
+        langCode = 'ja';
+        break;
+    }
+    await flutterTts.setLanguage(langCode);
+  }
+
+  Future<void> _stopText() async {
+    await flutterTts.stop();
     setState(() {
       isPlaying = false;
       isPaused = false;
@@ -651,27 +768,32 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
       _showSnackBar('No text to save');
       return;
     }
-    _showSnackBar('Audio saved as MP3');
+    _showSnackBar('this function is not yet implemented.');
   }
 
-  void _addToFavorites() {
+  Future<void> _addToFavorites() async {
     if (_textController.text.isEmpty) {
       _showSnackBar('No text to add to favorites');
       return;
     }
-    
+
     if (!favoriteTexts.contains(_textController.text)) {
       setState(() {
         favoriteTexts.add(_textController.text);
       });
+      await prefs.setStringList('Favorites', favoriteTexts);
       _showSnackBar('Added to favorites');
     } else {
       _showSnackBar('Already in favorites');
     }
   }
 
-  void _testVoiceSettings() {
-    _showSnackBar('Testing voice: $selectedVoice, $selectedAccent, Rate: ${speechRate.toStringAsFixed(1)}');
+  Future<void> _testVoiceSettings() async {
+    await _updateTTSSettings();
+    await flutterTts.speak('Tbis is a test for the current voice settings.');
+    _showSnackBar(
+      'Testing voice: $selectedVoice, $selectedAccent, Rate: ${speechRate.toStringAsFixed(1)}',
+    );
   }
 
   void _addToHistory(String text) {
@@ -679,7 +801,8 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
       historyItems.insert(0, {
         'text': text,
         'timestamp': DateTime.now(),
-        'duration': '0:${(text.length / 20).round().toString().padLeft(2, '0')}'
+        'duration':
+            '0:${(text.length / 20).round().toString().padLeft(2, '0')}',
       });
     });
   }
@@ -713,51 +836,146 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
     _playText();
   }
 
-  void _removeFromFavorites(int index) {
+  Future<void> _removeFromFavorites(int index) async {
     setState(() {
       favoriteTexts.removeAt(index);
     });
+    await prefs.setStringList('favorites', favoriteTexts);
     _showSnackBar('Removed from favorites');
   }
 
-  void _pickPDFFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf'],
-    );
+  Future<void> _pickPDFFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
 
-    if (result != null) {
-      _showSnackBar('PDF file selected: ${result.files.single.name}');
-      // TODO: Implement PDF text extraction
+      if (result != null) {
+        final file = File(result.files.single.path!);
+        final bytes = await file.readAsBytes();
+
+        final PdfDocument document = PdfDocument(inputBytes: bytes);
+
+        // Create an instance of PdfTextExtractor
+        PdfTextExtractor extractor = PdfTextExtractor(document);
+        String text = extractor.extractText();
+
+        document.dispose();
+
+        setState(() {
+          documentContent = text;
+          documentName = result.files.single.name;
+        });
+
+        _showSnackBar('PDF loaded: ${result.files.single.name}');
+      }
+    } catch (e) {
+      _showSnackBar('Error reading PDF: $e');
     }
   }
 
-  void _pickDocxFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['docx', 'doc'],
-    );
+  Future<void> _pickDocxFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['docx', 'doc'],
+      );
 
-    if (result != null) {
-      _showSnackBar('DOCX file selected: ${result.files.single.name}');
-      // TODO: Implement DOCX text extraction
+      if (result != null) {
+        final file = File(result.files.single.path!);
+        final bytes = await file.readAsBytes();
+
+        String text = await _extractTextFromDocx(bytes);
+
+        setState(() {
+          documentContent = text;
+          documentName = result.files.single.name;
+        });
+
+        _showSnackBar('DOCX loaded: ${result.files.single.name}');
+      }
+    } catch (e) {
+      _showSnackBar('Error reading DOCX: $e');
     }
   }
 
-  void _readWebContent() {
+  Future<String> _extractTextFromDocx(Uint8List bytes) async {
+    try {
+      final archive = ZipDecoder().decodeBytes(bytes);
+
+      for (final file in archive) {
+        if (file.name == 'word/document.xml') {
+          final content = utf8.decode(file.content as List<int>);
+          // Basic XML parsing to extract text
+          final doc = html.parse(content);
+          return doc.body?.text ?? '';
+        }
+      }
+      return '';
+    } catch (e) {
+      throw Exception('Failed to extract text from DOCX');
+    }
+  }
+
+  Future<void> _readWebContent() async {
     if (_urlController.text.isEmpty) {
       _showSnackBar('Please enter a URL');
       return;
     }
-    
-    _showSnackBar('Loading web content...');
-    // TODO: Implement web content extraction
+
+    try {
+      _showSnackBar('Loading web content...');
+
+      final response = await http.get(Uri.parse(_urlController.text));
+      if (response.statusCode == 200) {
+        final document = html.parse(response.body);
+
+        // Remove script and style elements
+        document
+            .querySelectorAll('script')
+            .forEach((element) => element.remove());
+        document
+            .querySelectorAll('style')
+            .forEach((element) => element.remove());
+
+        final text = document.body?.text ?? '';
+
+        setState(() {
+          documentContent = text;
+          documentName = _urlController.text;
+        });
+
+        _showSnackBar('Web content loaded successfully');
+      } else {
+        _showSnackBar('Failed to load web content');
+      }
+    } catch (e) {
+      _showSnackBar('Error loading web content: $e');
+    }
+  }
+
+  Future<void> _readDocument() async {
+  if (documentContent.isNotEmpty) {
+    await _updateTTSSettings();
+    await flutterTts.speak(documentContent);
+    _addToHistory('${documentContent.substring(0, 50)}...');
+    setState(() {
+      isPlaying = true;
+    });
+  }
+}
+
+  Future<void> _saveDocumentAudio() async {
+    _showSnackBar(
+      'Document audio save feature requires additional implementation',
+    );
   }
 
   String _formatDateTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
-    
+
     if (difference.inDays > 0) {
       return '${difference.inDays}d ago';
     } else if (difference.inHours > 0) {
@@ -769,12 +987,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin{
 
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 }
-
-

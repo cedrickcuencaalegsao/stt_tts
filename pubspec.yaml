@@ -31,10 +31,14 @@ dependencies:
   flutter:
     sdk: flutter
   file_picker: ^10.3.2
-
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  flutter_tts: ^4.2.3
+  shared_preferences: ^2.5.3
+  http: ^1.2.0
+  html: ^0.15.4
+  syncfusion_flutter_pdf: ^27.2.2  # For PDF reading
+  archive: ^3.6.1  # For DOCX reading
+  xml: ^6.5.0     # For DOCX parsing
 
 dev_dependencies:
   flutter_test:
