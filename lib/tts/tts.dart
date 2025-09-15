@@ -9,6 +9,10 @@ import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as html;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 import 'package:archive/archive.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
 class TTSPage extends StatefulWidget {
   const TTSPage({super.key});
@@ -27,6 +31,10 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
 
   final TextEditingController _textController = TextEditingController();
   final TextEditingController _urlController = TextEditingController();
+
+  FlutterSoundRecorder? _recorder;
+  bool _isRecording = false;
+  String? _audioFilePath;
 
   // Voice Settings
   String selectedVoice = 'Female';
@@ -77,6 +85,9 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
     await flutterTts.setPitch(pitch);
     await flutterTts.setVolume(volume);
 
+    _recorder = FlutterSoundRecorder();
+    await _recorder!.openRecorder();
+
     flutterTts.setCancelHandler(() {
       setState(() {
         isPlaying = false;
@@ -103,6 +114,7 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
     _textController.dispose();
     _urlController.dispose();
     flutterTts.stop();
+    _recorder?.closeRecorder();
     super.dispose();
   }
 
@@ -166,9 +178,14 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _saveAsAudio,
-                  icon: const Icon(Icons.download),
-                  label: const Text('Save as MP3'),
+                  onPressed: _isRecording ? null : _saveAsAudio,
+                  icon: Icon(
+                    _isRecording ? Icons.radio_button_checked : Icons.download,
+                  ),
+                  label: Text(_isRecording ? 'Recording...' : 'Save as Audio'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _isRecording ? Colors.red : null,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -763,12 +780,143 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
     _showSnackBar('Stopped');
   }
 
-  void _saveAsAudio() {
+  Future<void> _saveAsAudio() async {
     if (_textController.text.isEmpty) {
       _showSnackBar('No text to save');
       return;
     }
-    _showSnackBar('this function is not yet implemented.');
+
+    try {
+      // Request permissions
+      await _requestPermissions();
+
+      // Get the directory to save the file
+      Directory? directory;
+      if (Platform.isAndroid) {
+        directory = await getExternalStorageDirectory();
+      } else {
+        directory = await getApplicationDocumentsDirectory();
+      }
+
+      if (directory == null) {
+        _showSnackBar('Could not access storage directory');
+        return;
+      }
+
+      // Create filename with timestamp
+      String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      String fileName = 'tts_audio_$timestamp.aac';
+      _audioFilePath = path.join(directory.path, fileName);
+
+      _showSnackBar('Starting audio generation...');
+
+      // Start recording
+      await _recorder!.startRecorder(
+        toFile: _audioFilePath,
+        codec: Codec.aacADTS,
+      );
+
+      setState(() {
+        _isRecording = true;
+      });
+
+      // Set up TTS completion handler
+      flutterTts.setCompletionHandler(() async {
+        if (_isRecording) {
+          await _stopRecordingAndSave();
+        }
+      });
+
+      // Start TTS
+      await _updateTTSSettings();
+      await flutterTts.speak(_textController.text);
+    } catch (e) {
+      _showSnackBar('Error saving audio: $e');
+      setState(() {
+        _isRecording = false;
+      });
+    }
+  }
+
+  Future<void> _stopRecordingAndSave() async {
+    try {
+      await _recorder!.stopRecorder();
+      setState(() {
+        _isRecording = false;
+      });
+
+      if (_audioFilePath != null && await File(_audioFilePath!).exists()) {
+        _showSnackBar('Audio saved to: ${path.basename(_audioFilePath!)}');
+
+        // Optionally, you can show a dialog to let user know where the file is saved
+        _showSaveSuccessDialog(_audioFilePath!);
+      } else {
+        _showSnackBar('Failed to save audio file');
+      }
+    } catch (e) {
+      _showSnackBar('Error stopping recording: $e');
+      setState(() {
+        _isRecording = false;
+      });
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+    if (Platform.isAndroid) {
+      PermissionStatus storageStatus = await Permission.storage.status;
+      if (!storageStatus.isGranted) {
+        await Permission.storage.request();
+      }
+
+      PermissionStatus micStatus = await Permission.microphone.status;
+      if (!micStatus.isGranted) {
+        await Permission.microphone.request();
+      }
+
+      PermissionStatus audioStatus = await Permission.audio.status;
+      if (!audioStatus.isGranted) {
+        await Permission.audio.request();
+      }
+    } else if (Platform.isIOS) {
+      PermissionStatus micStatus = await Permission.microphone.status;
+      if (!micStatus.isGranted) {
+        await Permission.microphone.request();
+      }
+    }
+  }
+
+  void _showSaveSuccessDialog(String filePath) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Audio Saved'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Audio file has been saved successfully!'),
+              const SizedBox(height: 10),
+              Text(
+                'File: ${path.basename(filePath)}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                'Location: ${path.dirname(filePath)}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _addToFavorites() async {
@@ -956,20 +1104,66 @@ class TTSPageState extends State<TTSPage> with TickerProviderStateMixin {
   }
 
   Future<void> _readDocument() async {
-  if (documentContent.isNotEmpty) {
-    await _updateTTSSettings();
-    await flutterTts.speak(documentContent);
-    _addToHistory('${documentContent.substring(0, 50)}...');
-    setState(() {
-      isPlaying = true;
-    });
+    if (documentContent.isNotEmpty) {
+      await _updateTTSSettings();
+      await flutterTts.speak(documentContent);
+      _addToHistory('${documentContent.substring(0, 50)}...');
+      setState(() {
+        isPlaying = true;
+      });
+    }
   }
-}
 
   Future<void> _saveDocumentAudio() async {
-    _showSnackBar(
-      'Document audio save feature requires additional implementation',
-    );
+    if (documentContent.isEmpty) {
+      _showSnackBar('No document content to save');
+      return;
+    }
+
+    try {
+      await _requestPermissions();
+
+      Directory? directory;
+      if (Platform.isAndroid) {
+        directory = await getExternalStorageDirectory();
+      } else {
+        directory = await getApplicationDocumentsDirectory();
+      }
+
+      if (directory == null) {
+        _showSnackBar('Could not access storage directory');
+        return;
+      }
+
+      String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      String fileName = 'document_audio_$timestamp.aac';
+      _audioFilePath = path.join(directory.path, fileName);
+
+      _showSnackBar('Starting document audio generation...');
+
+      await _recorder!.startRecorder(
+        toFile: _audioFilePath,
+        codec: Codec.aacADTS,
+      );
+
+      setState(() {
+        _isRecording = true;
+      });
+
+      flutterTts.setCompletionHandler(() async {
+        if (_isRecording) {
+          await _stopRecordingAndSave();
+        }
+      });
+
+      await _updateTTSSettings();
+      await flutterTts.speak(documentContent);
+    } catch (e) {
+      _showSnackBar('Error saving document audio: $e');
+      setState(() {
+        _isRecording = false;
+      });
+    }
   }
 
   String _formatDateTime(DateTime dateTime) {
