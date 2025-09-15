@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:stt_tts/Shared/home/home.dart';
 import 'package:stt_tts/tts/tts.dart';
+import 'package:stt_tts/stt/stt.dart';
 
 void main() {
   runApp(const MyApp());
@@ -31,9 +32,9 @@ class App extends StatefulWidget {
 class AppState extends State<App> {
   int selectedPageIndex = 0;
 
-  final List<Widget> page = [HomePage(), TTSPage()];
+  final List<Widget> page = [HomePage(), TTSPage(), STTPage()];
 
-  final List<String> pageTitle = ["Home", "Text to speech"];
+  final List<String> pageTitle = ["Home", "Text to speech", "Speech to text"];
 
   // Page icons.
   Icon pageIcon(int index) {
@@ -42,6 +43,8 @@ class AppState extends State<App> {
         return const Icon(Icons.home);
       case 1:
         return const Icon(Icons.record_voice_over);
+      case 2:
+        return const Icon(Icons.mic);
       default:
         return const Icon(Icons.pages);
     }
@@ -52,27 +55,12 @@ class AppState extends State<App> {
     setState(() {
       selectedPageIndex = index;
     });
-    Navigator.canPop(context); // this will display the page.
+    Navigator.canPop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // appBar: AppBar(title: Text("STT and TTS")),
-      // drawer: Drawer(
-      //   child: ListView(
-      //     padding: EdgeInsets.all(0),
-      //     children: [
-      //       DrawerHeader(
-      //         decoration: BoxDecoration(color: Colors.blueAccent),
-      //         child: Text(
-      //           "Recent Activity",
-      //           style: TextStyle(color: Colors.white, fontSize: 24),
-      //         ),
-      //       ),
-      //     ],
-      //   ),
-      // ),
       body: page[selectedPageIndex],
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
